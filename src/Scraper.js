@@ -58,8 +58,18 @@ class WebScraper {
 
         this.context = await chromium.launchPersistentContext(this.config.userDataDir, {
             headless: this.config.headless,
-            userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/115 Safari/537.36',
-            proxy: proxyConfig
+            channel: 'chrome',
+            userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            viewport: { width: 1280, height: 800 },
+            proxy: proxyConfig,
+            args: [
+                '--disable-blink-features=AutomationControlled',
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-infobars',
+                '--window-size=1280,800',
+            ],
         });
 
         const pages = this.context.pages();
