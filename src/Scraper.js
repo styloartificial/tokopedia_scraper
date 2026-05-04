@@ -111,7 +111,7 @@ class WebScraper {
                 }
 
                 console.log("✅ pendingData ditemukan:", pendingData);
-                const result = await ScrapPendingDataInstance.run(pendingData);
+                const result = await ScrapPendingDataInstance.run(pendingData.products, pendingData.ticket_id);
                 console.log("Hasil scraping:", JSON.stringify(result, null, 2));
 
             } catch (err) {

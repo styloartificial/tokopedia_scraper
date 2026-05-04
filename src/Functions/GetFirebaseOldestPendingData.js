@@ -11,7 +11,7 @@ class GetFirebaseOldestPendingData {
     async run() {
         try {
             const res = await axiosInstance.get('/scraper/get-oldest-ticket-request');
-            const data = res.data.data.products;
+            const data = res.data.data;
 
             return data;
         } catch (error) {

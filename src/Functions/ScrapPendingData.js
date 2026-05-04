@@ -1,5 +1,6 @@
 const Helper = require("../Helpers/Helper");
 const ProductRecommender = require("../Helpers/ProductRecommender");
+const SetDoneTicketRequest = require("../Functions/SetDoneTicketRequest")
 
 class ScrapPendingData {
     constructor(page, config) {
@@ -39,7 +40,7 @@ class ScrapPendingData {
         return isNaN(value) ? null : Math.floor(value * multiplier);
     }
 
-    async run(pendingData) {
+    async run(pendingData, ticketId) {
         try {
             const isArrayOfString = Array.isArray(pendingData) && pendingData.every(item => typeof item === 'string');
             if (!isArrayOfString) return;
@@ -176,7 +177,7 @@ class ScrapPendingData {
 
             try {
                 Helper.PrintMsg("Storing scraped data to Firebase...");
-                const DoneTicketRequestInstance = new SetDoneTicketRequest(this.page, this.config, pendingData.ticket_id, storedData);
+                const DoneTicketRequestInstance = new SetDoneTicketRequest(this.page, this.config, ticketId, storedData); // ← pakai ticketId
                 await DoneTicketRequestInstance.run();
                 Helper.PrintMsg("Data stored to Firebase successfully.");
             } catch (error) {
