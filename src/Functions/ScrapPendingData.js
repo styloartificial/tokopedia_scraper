@@ -54,25 +54,46 @@ class ScrapPendingData {
     }
 
     async scrapeKeywordWithPage(page, keyword, windowIndex) {
+        const containerSelector = '[data-testid="divSRPContentProducts"], [data-testid*="SRPContentProducts"]';
+        const productCardSelector = `${containerSelector} a[href*="tokopedia.com"]`;
+
+        const attempt = async () => {
+            const searchInputSelector = await this.ensureTokopediaReady(page);
+
+            await page.click(searchInputSelector);
+            await page.fill(searchInputSelector, '');
+            await page.fill(searchInputSelector, keyword);
+            await page.press(searchInputSelector, 'Enter');
+
+            try {
+                await page.waitForURL(/\/search\?/, { timeout: 20000 });
+            } catch (_) { }
+
+            await page.waitForSelector(productCardSelector, { timeout: 45000 });
+        };
+
         try {
             Helper.PrintMsg(`[Window ${windowIndex}] Scraping data for: ${keyword}`);
 
-            const searchInputSelector = await this.ensureTokopediaReady(page);
-
-            await page.fill(searchInputSelector, '');
-            await page.click(searchInputSelector);
-            await page.type(searchInputSelector, keyword, { delay: 30 });
-            await page.keyboard.press('Enter');
-
             try {
-                await page.waitForURL(/\/search\?/, { timeout: 15000 });
-            } catch (_) {
+                await attempt();
+            } catch (err) {
+                let debug = null;
+                try {
+                    debug = await page.evaluate(() => ({
+                        url: location.href,
+                        title: document.title,
+                        text: (document.body?.innerText || '').slice(0, 300)
+                    }));
+                } catch (_) { }
+
+                Helper.PrintErrorMsg(`Retrying "${keyword}" (window ${windowIndex}). Debug: ${debug ? JSON.stringify(debug) : 'n/a'}`);
+                await page.goto('https://www.tokopedia.com', { waitUntil: 'domcontentloaded' });
+                await attempt();
             }
 
-            await page.waitForSelector('[data-testid="divSRPContentProducts"]', { timeout: 30000 });
-
             const rawProducts = await page.evaluate(() => {
-                const container = document.querySelector('[data-testid="divSRPContentProducts"]');
+                const container = document.querySelector('[data-testid="divSRPContentProducts"], [data-testid*="SRPContentProducts"]');
                 if (!container) return [];
 
                 const cards = Array.from(container.querySelectorAll('a[href*="tokopedia.com"]')).slice(0, 10);

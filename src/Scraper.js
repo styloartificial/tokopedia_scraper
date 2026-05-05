@@ -57,14 +57,19 @@ class WebScraper {
             password: process.env.PROXY_PASSWORD
         } : undefined;
 
+        const browserChannel = process.env.BROWSER_CHANNEL || (process.platform === 'win32' ? 'chrome' : undefined);
+
         this.context = await chromium.launchPersistentContext(this.config.userDataDir, {
             headless: this.config.headless,
-            channel: 'chrome',
+            ...(browserChannel ? { channel: browserChannel } : {}),
             userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
             viewport: { width: 1280, height: 800 },
             // proxy: proxyConfig,
             args: [
                 '--disable-blink-features=AutomationControlled',
+                '--disable-background-timer-throttling',
+                '--disable-backgrounding-occluded-windows',
+                '--disable-renderer-backgrounding',
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
                 '--disable-dev-shm-usage',
@@ -80,19 +85,22 @@ class WebScraper {
         this.launchScraperInstance = async (index) => {
             const instanceDir = path.resolve(this.config.userDataDir, `scraper_${index}`);
             const instanceContext = await chromium.launchPersistentContext(instanceDir, {
-                headless: false,
-                channel: 'chrome',
+                headless: this.config.headless,
+                ...(browserChannel ? { channel: browserChannel } : {}),
                 userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
                 viewport: { width: 1280, height: 800 },
                 // proxy: proxyConfig,
                 args: [
                     '--disable-blink-features=AutomationControlled',
+                    '--disable-background-timer-throttling',
+                    '--disable-backgrounding-occluded-windows',
+                    '--disable-renderer-backgrounding',
                     '--no-sandbox',
                     '--disable-setuid-sandbox',
                     '--disable-dev-shm-usage',
                     '--disable-infobars',
                     '--window-size=1280,800',
-                    `--window-position=${10000 + index * 100},0`,
+                    `--window-position=${index * 450},0`,
                 ],
             });
             const instancePages = instanceContext.pages();
