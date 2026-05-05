@@ -3,9 +3,10 @@ const ProductRecommender = require("../Helpers/ProductRecommender");
 const SetDoneTicketRequest = require("../Functions/SetDoneTicketRequest")
 
 class ScrapPendingData {
-    constructor(page, config) {
+    constructor(page, config, scraperInstances = []) {
         this.page = page;
         this.config = config;
+        this.scraperInstances = scraperInstances;
     }
 
     parsePrice(priceStr) {
@@ -40,148 +41,184 @@ class ScrapPendingData {
         return isNaN(value) ? null : Math.floor(value * multiplier);
     }
 
+    async ensureTokopediaReady(page) {
+        const searchInputSelector = 'input[type="search"][data-unify="Search"][aria-label="Cari di Tokopedia"]';
+        try {
+            await page.waitForSelector(searchInputSelector, { timeout: 5000 });
+            return searchInputSelector;
+        } catch (_) {
+            await page.goto('https://www.tokopedia.com', { waitUntil: 'domcontentloaded' });
+            await page.waitForSelector(searchInputSelector, { timeout: 30000 });
+            return searchInputSelector;
+        }
+    }
+
+    async scrapeKeywordWithPage(page, keyword, windowIndex) {
+        try {
+            Helper.PrintMsg(`[Window ${windowIndex}] Scraping data for: ${keyword}`);
+
+            const searchInputSelector = await this.ensureTokopediaReady(page);
+
+            await page.fill(searchInputSelector, '');
+            await page.click(searchInputSelector);
+            await page.type(searchInputSelector, keyword, { delay: 30 });
+            await page.keyboard.press('Enter');
+
+            try {
+                await page.waitForURL(/\/search\?/, { timeout: 15000 });
+            } catch (_) {
+            }
+
+            await page.waitForSelector('[data-testid="divSRPContentProducts"]', { timeout: 30000 });
+
+            const rawProducts = await page.evaluate(() => {
+                const container = document.querySelector('[data-testid="divSRPContentProducts"]');
+                if (!container) return [];
+
+                const cards = Array.from(container.querySelectorAll('a[href*="tokopedia.com"]')).slice(0, 10);
+                if (!cards.length) return [];
+
+                return cards.map(card => {
+                    const allSpans = card.querySelectorAll('span');
+
+                    const imgEl = card.querySelector('img[alt="product-image"]');
+                    const img_url = imgEl ? imgEl.src : null;
+
+                    const link_url = card.href || null;
+
+                    let name = null;
+                    for (const span of allSpans) {
+                        if (span.innerText && span.innerText.trim().length > 10) {
+                            name = span.innerText.trim();
+                            break;
+                        }
+                    }
+
+                    let price = null;
+                    for (const span of allSpans) {
+                        const text = span.innerText?.trim();
+                        if (text && text.startsWith('Rp') && !text.includes(' ')) {
+                            price = text;
+                            break;
+                        }
+                    }
+
+                    let rating = null;
+                    for (const span of allSpans) {
+                        const text = span.innerText?.trim();
+                        if (text && /^[1-5](\.[0-9])?$/.test(text)) {
+                            rating = text;
+                            break;
+                        }
+                    }
+
+                    let total_buy = null;
+                    for (const span of allSpans) {
+                        const text = span.innerText?.trim();
+                        if (text && text.toLowerCase().includes('terjual')) {
+                            total_buy = text;
+                            break;
+                        }
+                    }
+
+                    return { name, price, total_buy, rating, img_url, link_url };
+                });
+            });
+
+            if (!rawProducts.length) {
+                Helper.PrintErrorMsg(`No products found for: ${keyword}`);
+                return null;
+            }
+
+            Helper.PrintMsg(`Found ${rawProducts.length} products for: ${keyword}`);
+
+            const validProducts = rawProducts
+                .map(item => ({
+                    ...item,
+                    _parsedPrice: this.parsePrice(item.price),
+                    _parsedTotalBuy: this.parseTotalBuy(item.total_buy) ?? 0,
+                    _parsedRating: item.rating ? parseFloat(item.rating) : 0,
+                }))
+                .filter(item => item._parsedPrice !== null);
+
+            if (!validProducts.length) {
+                Helper.PrintErrorMsg(`No valid products after filtering for: ${keyword}, using first raw product as fallback`);
+                const fallback = rawProducts[0];
+                return {
+                    name: fallback.name,
+                    price: fallback.price,
+                    total_buy: fallback.total_buy,
+                    rating: fallback.rating,
+                    img_url: fallback.img_url,
+                    link_url: fallback.link_url,
+                };
+            }
+
+            const productsForRecommender = validProducts.map(item => ({
+                price: item._parsedPrice,
+                rating: item._parsedRating,
+                total_buy: item._parsedTotalBuy,
+            }));
+
+            const productRecommendation = ProductRecommender.getBest(productsForRecommender);
+            const bestProduct = validProducts[productRecommendation.index];
+
+            Helper.PrintMsg(`Best product for "${keyword}": ${bestProduct.name} (score: ${productRecommendation.score.toFixed(4)})`);
+
+            return {
+                name: bestProduct.name,
+                price: bestProduct.price,
+                total_buy: bestProduct.total_buy,
+                rating: bestProduct.rating,
+                img_url: bestProduct.img_url,
+                link_url: bestProduct.link_url,
+            };
+        } catch (err) {
+            Helper.PrintErrorMsg(`Error scraping "${keyword}": ${err.message}`);
+            return null;
+        }
+    }
+
     async run(pendingData, ticketId) {
         try {
             const isArrayOfString = Array.isArray(pendingData) && pendingData.every(item => typeof item === 'string');
             if (!isArrayOfString) return;
 
-            const storedData = [];
-
-            for (const data of pendingData) {
-                Helper.PrintMsg(`Scraping data for: ${data}`);
-
-                // 1. Navigasi ke halaman search Tokopedia
-                await this.page.goto(`https://www.tokopedia.com/search?st=product&q=${encodeURIComponent(data)}`, {
-                    waitUntil: 'load',
-                });
-
-                // 2. Tunggu container produk muncul
-                await this.page.waitForSelector('[data-testid="divSRPContentProducts"]', { timeout: 10000 });
-
-                // 3. Ambil 10 data produk teratas
-                const rawProducts = await this.page.evaluate(() => {
-                    const container = document.querySelector('[data-testid="divSRPContentProducts"]');
-                    if (!container) return [];
-
-                    // Ambil semua card produk (tag <a> yang punya href tokopedia)
-                    const cards = Array.from(container.querySelectorAll('a[href*="tokopedia.com"]')).slice(0, 10);
-                    if (!cards.length) return [];
-
-                    return cards.map(card => {
-                        const allSpans = card.querySelectorAll('span');
-
-                        // img_url
-                        const imgEl = card.querySelector('img[alt="product-image"]');
-                        const img_url = imgEl ? imgEl.src : null;
-
-                        // link_url
-                        const link_url = card.href || null;
-
-                        // name → span pertama yang punya teks lebih dari 10 karakter
-                        let name = null;
-                        for (const span of allSpans) {
-                            if (span.innerText && span.innerText.trim().length > 10) {
-                                name = span.innerText.trim();
-                                break;
-                            }
-                        }
-
-                        // price → span yang teksnya diawali "Rp"
-                        let price = null;
-                        for (const span of allSpans) {
-                            const text = span.innerText?.trim();
-                            if (text && text.startsWith('Rp') && !text.includes(' ')) {
-                                price = text;
-                                break;
-                            }
-                        }
-
-                        // rating → span yang isinya angka desimal antara 1.0 - 5.0
-                        let rating = null;
-                        for (const span of allSpans) {
-                            const text = span.innerText?.trim();
-                            if (text && /^[1-5](\.[0-9])?$/.test(text)) {
-                                rating = text;
-                                break;
-                            }
-                        }
-
-                        // total_buy → span yang mengandung kata "terjual"
-                        let total_buy = null;
-                        for (const span of allSpans) {
-                            const text = span.innerText?.trim();
-                            if (text && text.toLowerCase().includes('terjual')) {
-                                total_buy = text;
-                                break;
-                            }
-                        }
-
-                        return { name, price, total_buy, rating, img_url, link_url };
-                    });
-                });
-
-                if (!rawProducts.length) {
-                    Helper.PrintErrorMsg(`No products found for: ${data}`);
-                    continue;
-                }
-
-                Helper.PrintMsg(`Found ${rawProducts.length} products for: ${data}`);
-
-                // 4. Filter produk yang field pentingnya tidak null, lalu parse ke number
-                const validProducts = rawProducts
-                    .map(item => ({
-                        ...item,
-                        _parsedPrice: this.parsePrice(item.price),
-                        _parsedTotalBuy: this.parseTotalBuy(item.total_buy),
-                        _parsedRating: item.rating ? parseFloat(item.rating) : null,
-                    }))
-                    .filter(item =>
-                        item._parsedPrice !== null &&
-                        item._parsedTotalBuy !== null &&
-                        item._parsedRating !== null
-                    );
-
-                if (!validProducts.length) {
-                    Helper.PrintErrorMsg(`No valid products after filtering for: ${data}`);
-                    continue;
-                }
-
-                // 5. Siapkan data untuk ProductRecommender
-                const productsForRecommender = validProducts.map(item => ({
-                    price: item._parsedPrice,
-                    rating: item._parsedRating,
-                    total_buy: item._parsedTotalBuy,
-                }));
-
-                // 6. Dapatkan rekomendasi terbaik
-                const productRecommendation = ProductRecommender.getBest(productsForRecommender);
-
-                // 7. Ambil data asli berdasarkan index rekomendasi
-                const bestProduct = validProducts[productRecommendation.index];
-
-                Helper.PrintMsg(`Best product for "${data}": ${bestProduct.name} (score: ${productRecommendation.score.toFixed(4)})`);
-
-                storedData.push({
-                    name: bestProduct.name,
-                    price: bestProduct.price,
-                    total_buy: bestProduct.total_buy,
-                    rating: bestProduct.rating,
-                    img_url: bestProduct.img_url,
-                    link_url: bestProduct.link_url,
-                });
+            const scraperInstances = Array.isArray(this.scraperInstances) ? this.scraperInstances : [];
+            if (!scraperInstances.length) {
+                Helper.PrintErrorMsg("No scraper instances available.");
+                return [];
             }
 
-            await this.page.goto(this.config.pageUrl, {
-                waitUntil: 'load',
-            });
+            const workerCount = Math.min(scraperInstances.length, pendingData.length);
+            Helper.PrintMsg(`Processing ${pendingData.length} keywords with ${workerCount} scraper windows...`);
+
+            const results = new Array(pendingData.length).fill(null);
+            let nextIndex = 0;
+
+            const worker = async (workerIndex) => {
+                const page = scraperInstances[workerIndex].page;
+                while (true) {
+                    const current = nextIndex;
+                    nextIndex += 1;
+                    if (current >= pendingData.length) break;
+
+                    const keyword = pendingData[current];
+                    results[current] = await this.scrapeKeywordWithPage(page, keyword, workerIndex);
+                }
+            };
+
+            await Promise.all(Array.from({ length: workerCount }, (_, idx) => worker(idx)));
+
+            const storedData = results.filter(Boolean);
 
             try {
                 Helper.PrintMsg("Storing scraped data to Firebase...");
-                const DoneTicketRequestInstance = new SetDoneTicketRequest(this.page, this.config, ticketId, storedData); // ← pakai ticketId
+                const DoneTicketRequestInstance = new SetDoneTicketRequest(this.page, this.config, ticketId, storedData);
                 await DoneTicketRequestInstance.run();
                 Helper.PrintMsg("Data stored to Firebase successfully.");
             } catch (error) {
-                Helper.PrintErrorMsg(`Failed to store data to Firebase.`);
+                Helper.PrintErrorMsg(`Failed to store data to Firebase: ${error.message}`);
             }
 
             return storedData;

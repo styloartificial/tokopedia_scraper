@@ -22,6 +22,7 @@ class WebScraper {
 
         this.context = null;
         this.page = null;
+        this.scraperInstances = [];
     }
 
     async checkProxyDetails() {
@@ -61,7 +62,7 @@ class WebScraper {
             channel: 'chrome',
             userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
             viewport: { width: 1280, height: 800 },
-            proxy: proxyConfig,
+            // proxy: proxyConfig,
             args: [
                 '--disable-blink-features=AutomationControlled',
                 '--no-sandbox',
@@ -75,6 +76,41 @@ class WebScraper {
         const pages = this.context.pages();
         this.page = pages.length > 0 ? pages[0] : await this.context.newPage();
 
+        // Factory: buka scraper window baru on-demand saat ada pendingData
+        this.launchScraperInstance = async (index) => {
+            const instanceDir = path.resolve(this.config.userDataDir, `scraper_${index}`);
+            const instanceContext = await chromium.launchPersistentContext(instanceDir, {
+                headless: false,
+                channel: 'chrome',
+                userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+                viewport: { width: 1280, height: 800 },
+                // proxy: proxyConfig,
+                args: [
+                    '--disable-blink-features=AutomationControlled',
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    '--disable-dev-shm-usage',
+                    '--disable-infobars',
+                    '--window-size=1280,800',
+                    `--window-position=${10000 + index * 100},0`,
+                ],
+            });
+            const instancePages = instanceContext.pages();
+            const instancePage = instancePages.length > 0 ? instancePages[0] : await instanceContext.newPage();
+
+            return { context: instanceContext, page: instancePage };
+        };
+
+        const scraperWindowCount = 3;
+        Helper.PrintMsg(`Launching ${scraperWindowCount} scraper windows...`);
+        this.scraperInstances = [];
+        for (let i = 0; i < scraperWindowCount; i++) {
+            const instance = await this.launchScraperInstance(i);
+            await instance.page.goto('https://www.tokopedia.com', { waitUntil: 'domcontentloaded' });
+            this.scraperInstances.push(instance);
+        }
+        Helper.PrintMsg(`${scraperWindowCount} scraper windows ready.`);
+
         process.on('SIGINT', async () => {
             console.log("\nShutting down gracefully...");
             await this.close();
@@ -83,6 +119,13 @@ class WebScraper {
     }
 
     async close() {
+        if (this.scraperInstances && this.scraperInstances.length) {
+            for (const instance of this.scraperInstances) {
+                try {
+                    await instance.context.close();
+                } catch (_) { }
+            }
+        }
         if (this.context) {
             await this.context.close();
         }
@@ -90,7 +133,7 @@ class WebScraper {
 
     async run() {
         const GetFirebaseOldestPendingDataInstance = new GetFirebaseOldestPendingData(this.page, this.config);
-        const ScrapPendingDataInstance = new ScrapPendingData(this.page, this.config);
+        const ScrapPendingDataInstance = new ScrapPendingData(this.page, this.config, this.scraperInstances);
 
         console.log("Starting bot...");
         await this.checkProxyDetails();
@@ -98,7 +141,7 @@ class WebScraper {
         Helper.PrintMsg("Accessing Login Page...");
         await this.page.goto(this.config.pageUrl, { waitUntil: 'load' });
         Helper.PrintMsg("Login Page");
-        await Helper.Delay(10);
+        await Helper.Delay(5);
 
         while (true) {
             try {
