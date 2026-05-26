@@ -50,8 +50,13 @@ class ProductRecommender {
       .sort((a, b) => b.score - a.score);
   }
 
-  static getBest(products) {
-    return this.rank(products)[0];
+  // static getBest(products) {
+  //   return this.rank(products)[0];
+  // }
+
+  // ✅ Tambahan: ambil 3 produk terbaik
+  static getTop3(products) {
+    return this.rank(products).slice(0, 3);
   }
 }
 

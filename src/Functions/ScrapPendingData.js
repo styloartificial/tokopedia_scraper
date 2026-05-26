@@ -164,15 +164,16 @@ class ScrapPendingData {
 
             if (!validProducts.length) {
                 Helper.PrintErrorMsg(`No valid products after filtering for: ${keyword}, using first raw product as fallback`);
+                // ✅ Fallback return array
                 const fallback = rawProducts[0];
-                return {
+                return [{
                     name: fallback.name,
                     price: fallback.price,
                     total_buy: fallback.total_buy,
                     rating: fallback.rating,
                     img_url: fallback.img_url,
                     link_url: fallback.link_url,
-                };
+                }];
             }
 
             const productsForRecommender = validProducts.map(item => ({
@@ -181,19 +182,22 @@ class ScrapPendingData {
                 total_buy: item._parsedTotalBuy,
             }));
 
-            const productRecommendation = ProductRecommender.getBest(productsForRecommender);
-            const bestProduct = validProducts[productRecommendation.index];
+            // ✅ Ambil top 3 produk terbaik
+            const top3 = ProductRecommender.getTop3(productsForRecommender);
 
-            Helper.PrintMsg(`Best product for "${keyword}": ${bestProduct.name} (score: ${productRecommendation.score.toFixed(4)})`);
+            return top3.map(recommendation => {
+                const product = validProducts[recommendation.index];
+                Helper.PrintMsg(`Top product for "${keyword}": ${product.name} (score: ${recommendation.score.toFixed(4)})`);
+                return {
+                    name: product.name,
+                    price: product.price,
+                    total_buy: product.total_buy,
+                    rating: product.rating,
+                    img_url: product.img_url,
+                    link_url: product.link_url,
+                };
+            });
 
-            return {
-                name: bestProduct.name,
-                price: bestProduct.price,
-                total_buy: bestProduct.total_buy,
-                rating: bestProduct.rating,
-                img_url: bestProduct.img_url,
-                link_url: bestProduct.link_url,
-            };
         } catch (err) {
             Helper.PrintErrorMsg(`Error scraping "${keyword}": ${err.message}`);
             return null;
@@ -231,7 +235,10 @@ class ScrapPendingData {
 
             await Promise.all(Array.from({ length: workerCount }, (_, idx) => worker(idx)));
 
-            const storedData = results.filter(Boolean);
+            // ✅ Flatten hasil karena setiap keyword sekarang return array of products
+            const storedData = results
+                .filter(Boolean)
+                .flat();
 
             try {
                 Helper.PrintMsg("Storing scraped data to Firebase...");
