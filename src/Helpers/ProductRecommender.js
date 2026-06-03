@@ -15,7 +15,6 @@ class ProductRecommender {
 
   static normalize(value, min, max, isCost = false) {
     if (max - min === 0) return 0;
-
     if (isCost) {
       return (max - value) / (max - min);
     }
@@ -54,9 +53,12 @@ class ProductRecommender {
   //   return this.rank(products)[0];
   // }
 
-  // ✅ Tambahan: ambil 3 produk terbaik
+  // ✅ Ambil 3 produk terbaik berdasarkan composite score,
+  //    lalu tampilkan dari rating tertinggi
   static getTop3(products) {
-    return this.rank(products).slice(0, 3);
+    return this.rank(products)
+      .slice(0, 3)
+      .sort((a, b) => b.rating - a.rating);
   }
 }
 
