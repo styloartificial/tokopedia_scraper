@@ -153,6 +153,10 @@ class ScrapPendingData {
 
             Helper.PrintMsg(`Found ${rawProducts.length} products for: ${keyword}`);
 
+            // ✅ PERUBAHAN 1:
+            // Tidak ada lagi getTop3 di sini.
+            // Kembalikan semua valid products mentah beserta parsed values-nya
+            // supaya bisa di-scoring secara global di run()
             const validProducts = rawProducts
                 .map(item => ({
                     ...item,
@@ -164,7 +168,6 @@ class ScrapPendingData {
 
             if (!validProducts.length) {
                 Helper.PrintErrorMsg(`No valid products after filtering for: ${keyword}, using first raw product as fallback`);
-                // ✅ Fallback return array
                 const fallback = rawProducts[0];
                 return [{
                     name: fallback.name,
@@ -173,30 +176,13 @@ class ScrapPendingData {
                     rating: fallback.rating,
                     img_url: fallback.img_url,
                     link_url: fallback.link_url,
+                    _parsedPrice: this.parsePrice(fallback.price),
+                    _parsedTotalBuy: this.parseTotalBuy(fallback.total_buy) ?? 0,
+                    _parsedRating: fallback.rating ? parseFloat(fallback.rating) : 0,
                 }];
             }
 
-            const productsForRecommender = validProducts.map(item => ({
-                price: item._parsedPrice,
-                rating: item._parsedRating,
-                total_buy: item._parsedTotalBuy,
-            }));
-
-            // ✅ Ambil top 3 produk terbaik
-            const top3 = ProductRecommender.getTop3(productsForRecommender);
-
-            return top3.map(recommendation => {
-                const product = validProducts[recommendation.index];
-                Helper.PrintMsg(`Top product for "${keyword}": ${product.name} (score: ${recommendation.score.toFixed(4)})`);
-                return {
-                    name: product.name,
-                    price: product.price,
-                    total_buy: product.total_buy,
-                    rating: product.rating,
-                    img_url: product.img_url,
-                    link_url: product.link_url,
-                };
-            });
+            return validProducts;
 
         } catch (err) {
             Helper.PrintErrorMsg(`Error scraping "${keyword}": ${err.message}`);
@@ -235,10 +221,44 @@ class ScrapPendingData {
 
             await Promise.all(Array.from({ length: workerCount }, (_, idx) => worker(idx)));
 
-            // ✅ Flatten hasil karena setiap keyword sekarang return array of products
-            const storedData = results
+            // ✅ PERUBAHAN 2:
+            // Semua keyword sudah selesai di-scrape.
+            // Flatten dulu semua produk dari semua keyword jadi satu array.
+            const allProducts = results
                 .filter(Boolean)
                 .flat();
+
+            if (!allProducts.length) {
+                Helper.PrintErrorMsg("No products collected from all keywords.");
+                return [];
+            }
+
+            Helper.PrintMsg(`Total products collected: ${allProducts.length}. Scoring and sorting by rating...`);
+
+            // Buat array khusus untuk ProductRecommender (hanya field numerik)
+            const productsForRecommender = allProducts.map(item => ({
+                price: item._parsedPrice,
+                rating: item._parsedRating,
+                total_buy: item._parsedTotalBuy,
+            }));
+
+            // Hitung composite score untuk semua produk,
+            // lalu urutkan seluruhnya berdasarkan rating tertinggi
+            const ranked = ProductRecommender.rankByRatingAfterScore(productsForRecommender);
+
+            // Map balik ke data produk lengkap sesuai urutan ranking
+            const storedData = ranked.map(recommendation => {
+                const product = allProducts[recommendation.index];
+                Helper.PrintMsg(`Ranked product: ${product.name} | rating: ${product._parsedRating} | score: ${recommendation.score.toFixed(4)}`);
+                return {
+                    name: product.name,
+                    price: product.price,
+                    total_buy: product.total_buy,
+                    rating: product.rating,
+                    img_url: product.img_url,
+                    link_url: product.link_url,
+                };
+            });
 
             try {
                 Helper.PrintMsg("Storing scraped data to Firebase...");

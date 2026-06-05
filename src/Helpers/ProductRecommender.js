@@ -36,11 +36,7 @@ class ProductRecommender {
         normRating * this.weights.rating +
         normPrice * this.weights.price;
 
-      return {
-        index,
-        ...p,
-        score
-      };
+      return { index, ...p, score };
     });
   }
 
@@ -49,15 +45,9 @@ class ProductRecommender {
       .sort((a, b) => b.score - a.score);
   }
 
-  // static getBest(products) {
-  //   return this.rank(products)[0];
-  // }
-
-  // ✅ Ambil 3 produk terbaik berdasarkan composite score,
-  //    lalu tampilkan dari rating tertinggi
-  static getTop3(products) {
-    return this.rank(products)
-      .slice(0, 3)
+  // ✅ Hitung composite score semua produk, lalu urutkan by rating tertinggi
+  static rankByRatingAfterScore(products) {
+    return this.calculateScores(products)
       .sort((a, b) => b.rating - a.rating);
   }
 }
