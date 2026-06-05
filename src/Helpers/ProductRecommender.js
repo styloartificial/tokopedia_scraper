@@ -39,17 +39,6 @@ class ProductRecommender {
       return { index, ...p, score };
     });
   }
-
-  static rank(products) {
-    return this.calculateScores(products)
-      .sort((a, b) => b.score - a.score);
-  }
-
-  // ✅ Hitung composite score semua produk, lalu urutkan by rating tertinggi
-  static rankByRatingAfterScore(products) {
-    return this.calculateScores(products)
-      .sort((a, b) => b.rating - a.rating);
-  }
 }
 
 module.exports = ProductRecommender;

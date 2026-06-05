@@ -34,7 +34,6 @@ class ScrapPendingData {
             numStr = lower.replace("+", "").replace("terjual", "");
         }
 
-        // Handle koma desimal, misal "1,5"
         numStr = numStr.replace(",", ".");
 
         const value = parseFloat(numStr);
@@ -153,10 +152,8 @@ class ScrapPendingData {
 
             Helper.PrintMsg(`Found ${rawProducts.length} products for: ${keyword}`);
 
-            // ✅ PERUBAHAN 1:
-            // Tidak ada lagi getTop3 di sini.
-            // Kembalikan semua valid products mentah beserta parsed values-nya
-            // supaya bisa di-scoring secara global di run()
+            // Kembalikan semua valid products beserta _parsed fields
+            // Scoring & sorting dilakukan secara global di run()
             const validProducts = rawProducts
                 .map(item => ({
                     ...item,
@@ -221,7 +218,7 @@ class ScrapPendingData {
 
             await Promise.all(Array.from({ length: workerCount }, (_, idx) => worker(idx)));
 
-            // ✅ Flatten semua produk dari semua keyword
+            // Semua keyword selesai di-scrape, flatten jadi satu array
             const allProducts = results.filter(Boolean).flat();
 
             if (!allProducts.length) {
@@ -229,24 +226,37 @@ class ScrapPendingData {
                 return [];
             }
 
-            Helper.PrintMsg(`Total products collected: ${allProducts.length}. Sorting by rating...`);
+            Helper.PrintMsg(`Total products collected: ${allProducts.length}. Running composite score...`);
 
-            // ✅ FIX: Sort langsung dari allProducts by _parsedRating
-            // TIDAK perlu ProductRecommender di sini karena kamu mau urut by rating saja
-            const storedData = allProducts
-                .slice()
-                .sort((a, b) => b._parsedRating - a._parsedRating)
-                .map(product => {
-                    Helper.PrintMsg(`Ranked: ${product.name} | rating: ${product._parsedRating}`);
-                    return {
-                        name: product.name,
-                        price: product.price,
-                        total_buy: product.total_buy,
-                        rating: product.rating,
-                        img_url: product.img_url,
-                        link_url: product.link_url,
-                    };
-                });
+            // ✅ Hitung composite score — pakai index global (i) bukan index dari recommender
+            const productsInput = allProducts.map(p => ({
+                price: p._parsedPrice,
+                rating: p._parsedRating,
+                total_buy: p._parsedTotalBuy,
+            }));
+
+            const scored = ProductRecommender.calculateScores(productsInput)
+                .map((result, i) => ({
+                    ...result,
+                    _globalIndex: i, // ← index aman, sesuai posisi di allProducts
+                }));
+
+            // ✅ Sort by rating tertinggi setelah scoring
+            const ranked = scored.sort((a, b) => b.rating - a.rating);
+
+            // Map balik ke data produk lengkap
+            const storedData = ranked.map(r => {
+                const product = allProducts[r._globalIndex];
+                Helper.PrintMsg(`Ranked: ${product.name} | rating: ${product._parsedRating} | score: ${r.score.toFixed(4)}`);
+                return {
+                    name: product.name,
+                    price: product.price,
+                    total_buy: product.total_buy,
+                    rating: product.rating,
+                    img_url: product.img_url,
+                    link_url: product.link_url,
+                };
+            });
 
             try {
                 Helper.PrintMsg("Storing scraped data to Firebase...");
