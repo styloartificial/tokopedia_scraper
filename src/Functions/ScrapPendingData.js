@@ -221,44 +221,32 @@ class ScrapPendingData {
 
             await Promise.all(Array.from({ length: workerCount }, (_, idx) => worker(idx)));
 
-            // ✅ PERUBAHAN 2:
-            // Semua keyword sudah selesai di-scrape.
-            // Flatten dulu semua produk dari semua keyword jadi satu array.
-            const allProducts = results
-                .filter(Boolean)
-                .flat();
+            // ✅ Flatten semua produk dari semua keyword
+            const allProducts = results.filter(Boolean).flat();
 
             if (!allProducts.length) {
                 Helper.PrintErrorMsg("No products collected from all keywords.");
                 return [];
             }
 
-            Helper.PrintMsg(`Total products collected: ${allProducts.length}. Scoring and sorting by rating...`);
+            Helper.PrintMsg(`Total products collected: ${allProducts.length}. Sorting by rating...`);
 
-            // Buat array khusus untuk ProductRecommender (hanya field numerik)
-            const productsForRecommender = allProducts.map(item => ({
-                price: item._parsedPrice,
-                rating: item._parsedRating,
-                total_buy: item._parsedTotalBuy,
-            }));
-
-            // Hitung composite score untuk semua produk,
-            // lalu urutkan seluruhnya berdasarkan rating tertinggi
-            const ranked = ProductRecommender.rankByRatingAfterScore(productsForRecommender);
-
-            // Map balik ke data produk lengkap sesuai urutan ranking
-            const storedData = ranked.map(recommendation => {
-                const product = allProducts[recommendation.index];
-                Helper.PrintMsg(`Ranked product: ${product.name} | rating: ${product._parsedRating} | score: ${recommendation.score.toFixed(4)}`);
-                return {
-                    name: product.name,
-                    price: product.price,
-                    total_buy: product.total_buy,
-                    rating: product.rating,
-                    img_url: product.img_url,
-                    link_url: product.link_url,
-                };
-            });
+            // ✅ FIX: Sort langsung dari allProducts by _parsedRating
+            // TIDAK perlu ProductRecommender di sini karena kamu mau urut by rating saja
+            const storedData = allProducts
+                .slice()
+                .sort((a, b) => b._parsedRating - a._parsedRating)
+                .map(product => {
+                    Helper.PrintMsg(`Ranked: ${product.name} | rating: ${product._parsedRating}`);
+                    return {
+                        name: product.name,
+                        price: product.price,
+                        total_buy: product.total_buy,
+                        rating: product.rating,
+                        img_url: product.img_url,
+                        link_url: product.link_url,
+                    };
+                });
 
             try {
                 Helper.PrintMsg("Storing scraped data to Firebase...");
