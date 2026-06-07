@@ -150,10 +150,9 @@ class ScrapPendingData {
                 return null;
             }
 
-            Helper.PrintMsg(`Found ${rawProducts.length} products for: ${keyword}`);
+            Helper.PrintMsg(`Found ${rawProducts.length} raw products for: ${keyword}`);
 
-            // Kembalikan semua valid products beserta _parsed fields
-            // Scoring & sorting dilakukan secara global di run()
+            // Parse fields numerik untuk keperluan scoring
             const validProducts = rawProducts
                 .map(item => ({
                     ...item,
@@ -201,6 +200,7 @@ class ScrapPendingData {
             const workerCount = Math.min(scraperInstances.length, pendingData.length);
             Helper.PrintMsg(`Processing ${pendingData.length} keywords with ${workerCount} scraper windows...`);
 
+            // results[i] = array of valid products untuk keyword ke-i
             const results = new Array(pendingData.length).fill(null);
             let nextIndex = 0;
 
@@ -218,45 +218,69 @@ class ScrapPendingData {
 
             await Promise.all(Array.from({ length: workerCount }, (_, idx) => worker(idx)));
 
-            // Semua keyword selesai di-scrape, flatten jadi satu array
-            const allProducts = results.filter(Boolean).flat();
+            // ─────────────────────────────────────────────────────────────
+            // STEP 1: Per kategori (keyword), hitung composite score dari
+            //         semua produk yang di-scrape, lalu ambil TOP 3.
+            // ─────────────────────────────────────────────────────────────
+            const top3PerCategory = [];
 
-            if (!allProducts.length) {
-                Helper.PrintErrorMsg("No products collected from all keywords.");
+            results.forEach((products, keywordIndex) => {
+                const keyword = pendingData[keywordIndex];
+
+                if (!products || !products.length) {
+                    Helper.PrintErrorMsg(`Skipping keyword "${keyword}": no products.`);
+                    return;
+                }
+
+                // Input ke ProductRecommender: price, rating, total_buy
+                const productsInput = products.map(p => ({
+                    price: p._parsedPrice,
+                    rating: p._parsedRating,
+                    total_buy: p._parsedTotalBuy,
+                }));
+
+                // Hitung composite score → sort → ambil top 3
+                const top3 = ProductRecommender.getTop3(productsInput);
+
+                Helper.PrintMsg(`[${keyword}] Top 3 by composite score:`);
+                top3.forEach((r, rank) => {
+                    const product = products[r.index];
+                    Helper.PrintMsg(`  #${rank + 1} ${product.name} | rating: ${product._parsedRating} | score: ${r.score.toFixed(4)}`);
+
+                    // Simpan produk lengkap beserta info kategori & parsed rating
+                    top3PerCategory.push({
+                        name: product.name,
+                        price: product.price,
+                        total_buy: product.total_buy,
+                        rating: product.rating,
+                        img_url: product.img_url,
+                        link_url: product.link_url,
+                        _parsedRating: product._parsedRating,  // untuk sorting global
+                        _category: keyword,                     // opsional: debug
+                        _compositeScore: r.score,
+                    });
+                });
+            });
+
+            if (!top3PerCategory.length) {
+                Helper.PrintErrorMsg("No products collected after per-category scoring.");
                 return [];
             }
 
-            Helper.PrintMsg(`Total products collected: ${allProducts.length}. Running composite score...`);
+            // ─────────────────────────────────────────────────────────────
+            // STEP 2: Gabungkan semua top 3 dari tiap kategori, lalu
+            //         urutkan secara GLOBAL berdasarkan rating tertinggi.
+            //         Hasilnya: urutan mixed antar kategori, rating tinggi dulu.
+            // ─────────────────────────────────────────────────────────────
+            const globalRanked = top3PerCategory.sort((a, b) => b._parsedRating - a._parsedRating);
 
-            // ✅ Hitung composite score — pakai index global (i) bukan index dari recommender
-            const productsInput = allProducts.map(p => ({
-                price: p._parsedPrice,
-                rating: p._parsedRating,
-                total_buy: p._parsedTotalBuy,
-            }));
-
-            const scored = ProductRecommender.calculateScores(productsInput)
-                .map((result, i) => ({
-                    ...result,
-                    _globalIndex: i, // ← index aman, sesuai posisi di allProducts
-                }));
-
-            // ✅ Sort by rating tertinggi setelah scoring
-            const ranked = scored.sort((a, b) => b.rating - a.rating);
-
-            // Map balik ke data produk lengkap
-            const storedData = ranked.map(r => {
-                const product = allProducts[r._globalIndex];
-                Helper.PrintMsg(`Ranked: ${product.name} | rating: ${product._parsedRating} | score: ${r.score.toFixed(4)}`);
-                return {
-                    name: product.name,
-                    price: product.price,
-                    total_buy: product.total_buy,
-                    rating: product.rating,
-                    img_url: product.img_url,
-                    link_url: product.link_url,
-                };
+            Helper.PrintMsg(`\nGlobal ranking by rating (${globalRanked.length} products total):`);
+            globalRanked.forEach((p, i) => {
+                Helper.PrintMsg(`  [${i + 1}] ${p.name} | rating: ${p._parsedRating} | kategori: ${p._category}`);
             });
+
+            // Bersihkan field internal sebelum dikirim ke Firebase
+            const storedData = globalRanked.map(({ _parsedRating, _category, _compositeScore, ...clean }) => clean);
 
             try {
                 Helper.PrintMsg("Storing scraped data to Firebase...");

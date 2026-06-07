@@ -15,6 +15,7 @@ class ProductRecommender {
 
   static normalize(value, min, max, isCost = false) {
     if (max - min === 0) return 0;
+
     if (isCost) {
       return (max - value) / (max - min);
     }
@@ -36,8 +37,26 @@ class ProductRecommender {
         normRating * this.weights.rating +
         normPrice * this.weights.price;
 
-      return { index, ...p, score };
+      return {
+        index,
+        ...p,
+        score
+      };
     });
+  }
+
+  static rank(products) {
+    return this.calculateScores(products)
+      .sort((a, b) => b.score - a.score);
+  }
+
+  // static getBest(products) {
+  //   return this.rank(products)[0];
+  // }
+
+  // ✅ Tambahan: ambil 3 produk terbaik
+  static getTop3(products) {
+    return this.rank(products).slice(0, 3);
   }
 }
 
