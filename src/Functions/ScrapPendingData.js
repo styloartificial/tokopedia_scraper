@@ -115,13 +115,34 @@ class ScrapPendingData {
                     }
 
                     let price = null;
-                    for (const span of allSpans) {
-                        const text = span.innerText?.trim();
-                        if (text && text.startsWith('Rp') && !text.includes(' ')) {
-                            price = text;
-                            break;
+                    const getPriceText = () => {
+                        const priceSelectors = [
+                            '[data-testid*="Price"]',
+                            '[data-testid*="harga"]',
+                            '[aria-label*="Harga"]',
+                            '[aria-label*="harga"]',
+                            'span:has(strong)',
+                        ];
+                        for (const selector of priceSelectors) {
+                            const el = card.querySelector(selector);
+                            if (el && el.innerText?.trim()) {
+                                const text = el.innerText.trim();
+                                if (/Rp\s*[0-9]/.test(text)) return text;
+                            }
                         }
-                    }
+
+                        const candidates = Array.from(allSpans)
+                            .map(span => span.innerText?.trim())
+                            .filter(text => text && /Rp\s*[0-9]/.test(text))
+                            .filter(text => !/terjual|diskon|mulai dari|voucher|ongkir|promo|cod|cashback/i.test(text));
+
+                        if (candidates.length) return candidates[0];
+                        return Array.from(allSpans)
+                            .map(span => span.innerText?.trim())
+                            .find(text => text && /Rp\s*[0-9]/.test(text));
+                    };
+
+                    price = getPriceText();
 
                     let rating = null;
                     for (const span of allSpans) {
