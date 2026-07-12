@@ -116,30 +116,22 @@ class ScrapPendingData {
 
                     let price = null;
                     const getPriceText = () => {
-                        const priceSelectors = [
-                            '[data-testid*="Price"]',
-                            '[data-testid*="harga"]',
-                            '[aria-label*="Harga"]',
-                            '[aria-label*="harga"]',
-                            'span:has(strong)',
-                        ];
-                        for (const selector of priceSelectors) {
-                            const el = card.querySelector(selector);
-                            if (el && el.innerText?.trim()) {
-                                const text = el.innerText.trim();
-                                if (/Rp\s*[0-9]/.test(text)) return text;
-                            }
-                        }
-
-                        const candidates = Array.from(allSpans)
+                        // ✅ Cari semua span yang mengandung Rp
+                        const priceSpans = Array.from(allSpans)
                             .map(span => span.innerText?.trim())
-                            .filter(text => text && /Rp\s*[0-9]/.test(text))
-                            .filter(text => !/terjual|diskon|mulai dari|voucher|ongkir|promo|cod|cashback/i.test(text));
+                            .filter(text => text && /Rp\s*[0-9]/.test(text));
 
-                        if (candidates.length) return candidates[0];
-                        return Array.from(allSpans)
-                            .map(span => span.innerText?.trim())
-                            .find(text => text && /Rp\s*[0-9]/.test(text));
+                        if (!priceSpans.length) return null;
+
+                        // ✅ Parse semua ke angka dan ambil yang TERBESAR
+                        const pricesWithValues = priceSpans.map(text => {
+                            const cleaned = text.replace(/[^0-9]/g, '');
+                            const value = parseInt(cleaned, 10);
+                            return { text, value: isNaN(value) ? 0 : value };
+                        });
+
+                        const maxPrice = pricesWithValues.reduce((max, p) => p.value > max.value ? p : max);
+                        return maxPrice.text;
                     };
 
                     price = getPriceText();
