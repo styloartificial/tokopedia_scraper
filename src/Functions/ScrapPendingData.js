@@ -1,6 +1,8 @@
 const Helper = require("../Helpers/Helper");
 const ProductRecommender = require("../Helpers/ProductRecommender");
-const SetDoneTicketRequest = require("../Functions/SetDoneTicketRequest")
+const SetDoneTicketRequest = require("../Functions/SetDoneTicketRequest");
+const axiosClass = require("../Helpers/AxiosInstance");
+const axiosInstance = axiosClass.getInstance();
 
 class ScrapPendingData {
     constructor(page, config, scraperInstances = []) {
@@ -38,6 +40,38 @@ class ScrapPendingData {
 
         const value = parseFloat(numStr);
         return isNaN(value) ? null : Math.floor(value * multiplier);
+    }
+
+    async scrapeLazadaKeyword(keyword) {
+        try {
+            Helper.PrintMsg(`[Lazada] Fetching products for: ${keyword}`);
+            const response = await axiosInstance.post('/scraper/search-products', { product_name: keyword });
+            const items = response.data?.data || response.data || [];
+
+            if (!Array.isArray(items) || !items.length) return [];
+
+            return items
+                .map(item => ({
+                    name: item.title,
+                    price: item.pricing?.current != null
+                        ? `Rp ${item.pricing.current.toLocaleString('id-ID')}`
+                        : null,
+                    total_buy: item.sold_count != null ? String(item.sold_count) : null,
+                    rating: item.reviews?.average_rating != null
+                        ? String(item.reviews.average_rating)
+                        : null,
+                    img_url: item.thumbnail_url,
+                    link_url: item.product_url,
+                    _parsedPrice: item.pricing?.current ?? null,
+                    _parsedTotalBuy: item.sold_count ?? 0,
+                    _parsedRating: item.reviews?.average_rating ?? 0,
+                    source: 'lazada',
+                }))
+                .filter(p => p._parsedPrice !== null);
+        } catch (err) {
+            Helper.PrintErrorMsg(`Error fetching Lazada for "${keyword}": ${err.message}`);
+            return [];
+        }
     }
 
     async ensureTokopediaReady(page) {
@@ -225,7 +259,14 @@ class ScrapPendingData {
                     if (current >= pendingData.length) break;
 
                     const keyword = pendingData[current];
-                    results[current] = await this.scrapeKeywordWithPage(page, keyword, workerIndex);
+                    const [tokopediaProducts, lazadaProducts] = await Promise.all([
+                        this.scrapeKeywordWithPage(page, keyword, workerIndex),
+                        this.scrapeLazadaKeyword(keyword),
+                    ]);
+
+                    const tokopediaWithSource = (tokopediaProducts || []).map(p => ({ ...p, source: 'tokopedia' }));
+                    const combined = [...tokopediaWithSource, ...lazadaProducts];
+                    results[current] = combined.length ? combined : null;
                 }
             };
 
@@ -245,32 +286,38 @@ class ScrapPendingData {
                     return;
                 }
 
-                // Input ke ProductRecommender: price, rating, total_buy
-                const productsInput = products.map(p => ({
-                    price: p._parsedPrice,
-                    rating: p._parsedRating,
-                    total_buy: p._parsedTotalBuy,
-                }));
+                // Pisahkan produk per source, lalu ambil top 3 dari masing-masing
+                const sources = [...new Set(products.map(p => p.source).filter(Boolean))];
 
-                // Hitung composite score → sort → ambil top 3
-                const top3 = ProductRecommender.getTop3(productsInput);
+                sources.forEach(source => {
+                    const sourceProducts = products.filter(p => p.source === source);
+                    if (!sourceProducts.length) return;
 
-                Helper.PrintMsg(`[${keyword}] Top 3 by composite score:`);
-                top3.forEach((r, rank) => {
-                    const product = products[r.index];
-                    Helper.PrintMsg(`  #${rank + 1} ${product.name} | rating: ${product._parsedRating} | score: ${r.score.toFixed(4)}`);
+                    const productsInput = sourceProducts.map(p => ({
+                        price: p._parsedPrice,
+                        rating: p._parsedRating,
+                        total_buy: p._parsedTotalBuy,
+                    }));
 
-                    // Simpan produk lengkap beserta info kategori & parsed rating
-                    top3PerCategory.push({
-                        name: product.name,
-                        price: product.price,
-                        total_buy: product.total_buy,
-                        rating: product.rating,
-                        img_url: product.img_url,
-                        link_url: product.link_url,
-                        _parsedRating: product._parsedRating,  // untuk sorting global
-                        _category: keyword,                     // opsional: debug
-                        _compositeScore: r.score,
+                    const top3 = ProductRecommender.getTop3(productsInput);
+
+                    Helper.PrintMsg(`[${keyword}][${source}] Top 3 by composite score:`);
+                    top3.forEach((r, rank) => {
+                        const product = sourceProducts[r.index];
+                        Helper.PrintMsg(`  #${rank + 1} ${product.name} | rating: ${product._parsedRating} | score: ${r.score.toFixed(4)}`);
+
+                        top3PerCategory.push({
+                            name: product.name,
+                            price: product.price,
+                            total_buy: product.total_buy,
+                            rating: product.rating,
+                            img_url: product.img_url,
+                            link_url: product.link_url,
+                            source: product.source,
+                            _parsedRating: product._parsedRating,  // untuk sorting global
+                            _category: keyword,                     // opsional: debug
+                            _compositeScore: r.score,
+                        });
                     });
                 });
             });
