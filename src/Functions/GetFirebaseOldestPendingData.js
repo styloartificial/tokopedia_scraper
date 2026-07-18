@@ -1,6 +1,10 @@
 const axiosClass = require("../Helpers/AxiosInstance");
 const axiosInstance = axiosClass.getInstance();
 const Helper = require("../Helpers/Helper");
+const fs = require('fs');
+const path = require('path');
+
+const queuePath = path.join(__dirname, '../../..', 'queue.json');
 
 class GetFirebaseOldestPendingData {
     constructor(page, config) {
@@ -10,10 +14,22 @@ class GetFirebaseOldestPendingData {
 
     async run() {
         try {
-            const res = await axiosInstance.get('/scraper/get-oldest-ticket-request');
-            const data = res.data.data;
+            if (!fs.existsSync(queuePath)) {
+                return null;
+            }
 
-            return data;
+            const raw = fs.readFileSync(queuePath, 'utf8');
+
+            if (!raw.trim()) {
+                return null;
+            }
+
+            const queue = JSON.parse(raw);
+
+            if (!Array.isArray(queue) || queue.length === 0) {
+                return null;
+            }
+            return queue[0];
         } catch (error) {
             Helper.PrintErrorMsg(`Failed to get pending data: ${error.message}`);
             throw error;
