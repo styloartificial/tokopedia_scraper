@@ -335,19 +335,20 @@ class ScrapPendingData {
             }
 
             // ─────────────────────────────────────────────────────────────
-            // STEP 2: Gabungkan semua top 3 dari tiap kategori, lalu
-            //         urutkan secara GLOBAL berdasarkan rating tertinggi.
-            //         Hasilnya: urutan mixed antar kategori, rating tinggi dulu.
+            // STEP 2: Group hasil per product index (keyword), urutkan
+            //         by rating di dalam masing-masing group.
             // ─────────────────────────────────────────────────────────────
-            const globalRanked = top3PerCategory.sort((a, b) => b._parsedRating - a._parsedRating);
+            const storedData = pendingData.map((keyword, idx) => {
+                const group = top3PerCategory
+                    .filter(p => p._category === keyword)
+                    .sort((a, b) => b._parsedRating - a._parsedRating)
+                    .map(({ _parsedRating, _category, _compositeScore, ...clean }) => clean);
 
-            Helper.PrintMsg(`\nGlobal ranking by rating (${globalRanked.length} products total):`);
-            globalRanked.forEach((p, i) => {
-                Helper.PrintMsg(`  [${i + 1}] ${p.name} | rating: ${p._parsedRating} | kategori: ${p._category}`);
+                Helper.PrintMsg(`\n[Product ${idx}] "${keyword}" → ${group.length} products`);
+                group.forEach((p, i) => Helper.PrintMsg(`  [${i + 1}] ${p.name} | source: ${p.source} | rating: ${p.rating}`));
+
+                return { product: keyword, results: group };
             });
-
-            // Bersihkan field internal sebelum dikirim ke Firebase
-            const storedData = globalRanked.map(({ _parsedRating, _category, _compositeScore, ...clean }) => clean);
 
             try {
                 Helper.PrintMsg("Storing scraped data to Firebase...");
