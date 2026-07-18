@@ -69,7 +69,7 @@ class ScrapPendingData {
                 }))
                 .filter(p => p._parsedPrice !== null);
         } catch (err) {
-            Helper.PrintErrorMsg(`Error fetching Lazada for "${keyword}": ${err.message}`);
+            Helper.PrintErrorMsg(`Error fetching Lazada for "${keyword}": ${err}`);
             return [];
         }
     }
