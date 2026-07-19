@@ -53,8 +53,8 @@ class ScrapPendingData {
             return items
                 .map(item => ({
                     name: item.title,
-                    price: item.pricing?.current != null
-                        ? `Rp ${item.pricing.current.toLocaleString('id-ID')}`
+                    price: item.pricing?.original != null
+                        ? `Rp ${item.pricing.original.toLocaleString('id-ID')}`
                         : null,
                     total_buy: item.sold_count != null ? String(item.sold_count) : null,
                     rating: item.reviews?.average_rating != null
@@ -62,7 +62,7 @@ class ScrapPendingData {
                         : null,
                     img_url: item.thumbnail_url,
                     link_url: item.product_url,
-                    _parsedPrice: item.pricing?.current ?? null,
+                    _parsedPrice: item.pricing?.original ?? null,
                     _parsedTotalBuy: item.sold_count ?? 0,
                     _parsedRating: item.reviews?.average_rating ?? 0,
                     source: 'lazada',
