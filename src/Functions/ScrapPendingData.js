@@ -1,7 +1,7 @@
 const Helper = require("../Helpers/Helper");
 const ProductRecommender = require("../Helpers/ProductRecommender");
 const SetDoneTicketRequest = require("../Functions/SetDoneTicketRequest");
-const axiosClass = require("../Helpers/AxiosInstance");
+const chartedSeaClient = require("../Helpers/ChartedSeaClient");
 const axiosInstance = axiosClass.getInstance();
 
 class ScrapPendingData {
@@ -44,39 +44,37 @@ class ScrapPendingData {
 
     async scrapeLazadaKeyword(keyword) {
         try {
-            Helper.PrintMsg(`[Lazada] Fetching products for: ${keyword}`);
-            const response = await axiosInstance.post('/scraper/search-products', { product_name: keyword });
-            const items = response.data?.data || response.data || [];
+            Helper.PrintMsg(`[Lazada] scraping data for: ${keyword}`);
 
+            const body = await chartedSeaClient.runLazadaSearch(keyword, {
+                tld: process.env.LAZADA_MARKETPLACE_TLD || 'co.id',
+                language: 'id',
+            });
+
+            const items = body?.products || [];
             if (!Array.isArray(items) || !items.length) return [];
 
             return items
                 .map(item => ({
-                    name: item.title,
-                    price: item.pricing?.original != null
-                        ? `Rp ${item.pricing.original.toLocaleString('id-ID')}`
+                    name: item.name,
+                    price: item.price != null
+                        ? `Rp${Math.round(item.price).toLocaleString('id-ID')}`
                         : null,
-                    total_buy: item.sold_count != null ? String(item.sold_count) : null,
-                    rating: item.reviews?.average_rating != null
-                        ? String(item.reviews.average_rating)
-                        : null,
-                    img_url: item.thumbnail_url,
-                    link_url: item.product_url,
-                    _parsedPrice: item.pricing?.original ?? null,
-                    _parsedTotalBuy: item.sold_count ?? 0,
-                    _parsedRating: item.reviews?.average_rating ?? 0,
+                    total_buy: item.soldCount != null ? `${item.soldCount} terjual` : null,
+                    rating: item.ratingScore != null ? String(item.ratingScore) : null,
+                    img_url: item.imageUrl,
+                    link_url: item.pageUrl,
+                    _parsedPrice: item.price ?? null,
+                    _parsedTotalBuy: item.soldCount ?? 0,
+                    _parsedRating: item.ratingScore ?? 0,
                     source: 'lazada',
                 }))
                 .filter(p => p._parsedPrice !== null);
+
         } catch (err) {
-            console.log(err.response?.status);
-            console.log(err.response?.data);
-
             Helper.PrintErrorMsg(
-                `Error fetching Lazada for "${keyword}": ${JSON.stringify(err.response?.data || err.message)
-                }`
+                `Error fetching Lazada for "${keyword}": ${err.response?.data ? JSON.stringify(err.response.data) : err.message}`
             );
-
             return [];
         }
     }
